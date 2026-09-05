@@ -1,0 +1,15 @@
+$kind: grpc-request
+url: localhost:50051
+methodPath: order.OrderService.CreateOrder
+methodDescriptor: CocDCgtvcmRlci5wcm90bxIFb3JkZXIiTAoJT3JkZXJJdGVtEhYKCnByb2R1Y3RfaWQYASABKAlCAhABEhQKCHF1YW50aXR5GAIgASgDQgIQARIRCgVwcmljZRgDIAEoAkICEAEiSwoSQ3JlYXRlT3JkZXJSZXF1ZXN0EhcKC2N1c3RvbWVyX2lkGAEgASgJQgIQARIcCgVpdGVtcxgCIAMoCzIJT3JkZXJJdGVtQgIQASIrChNDcmVhdGVPcmRlclJlc3BvbnNlEhQKCG9yZGVyX2lkGAEgASgJQgIQATJUCgxPcmRlclNlcnZpY2USRAoLQ3JlYXRlT3JkZXISGS5vcmRlci5DcmVhdGVPcmRlclJlcXVlc3QaGi5vcmRlci5DcmVhdGVPcmRlclJlc3BvbnNlQlNaUWdpdGh1Yi5jb20vRHJhZ29uWmVybzAwMC9FdmVudC1Ecml2ZW4tT3JkZXItUHJvY2Vzc2luZy1TeXN0ZW0vcHJvdG8vb3JkZXI7b3JkZXJwYg==
+message:
+  content: |-
+    {
+        "customer_id": "velit cupidatat ea",
+        "items": [ {"product_id": "dasdsad", "quantity": 10, "price": 5}]
+    }
+settings: {}
+schema:
+  source: specification
+  specificationId: QzpcVXNlcnNcRGFya1xEZXNrdG9wXFByb2plY3RzXEV2ZW50LURyaXZlbi1PcmRlci1Qcm9jZXNzaW5nLVN5c3RlbVxwcm90b1xvcmRlci5wcm90bw
+order: 1788554889467
