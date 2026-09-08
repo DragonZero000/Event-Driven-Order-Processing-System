@@ -1,23 +1,19 @@
-# docker/Dockerfile.order
-FROM golang:1.21-alpine
+FROM golang:1.26.4-alpine AS builder
 
 WORKDIR /app
 
-# Копируем go.mod и go.sum
 COPY go.mod go.sum ./
 RUN go mod download
 
-# Копируем исходники
 COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /order-service ./cmd/order-service
 
-# Сборка
-RUN go build -o /order-service ./cmd/order-service
+FROM alpine:3.20
 
-# Порт для health check
-EXPOSE 8080
+WORKDIR /app
+COPY --from=builder /order-service .
 
 # gRPC порт
 EXPOSE 50051
-
 # Запуск
-CMD ["/order-service"]
+CMD ["./order-service"]

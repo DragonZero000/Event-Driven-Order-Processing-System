@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	order "github.com/DragonZero000/Event-Driven-Order-Processing-System/internal/order"
+	"github.com/DragonZero000/Event-Driven-Order-Processing-System/pkg/kafka"
 	pb "github.com/DragonZero000/Event-Driven-Order-Processing-System/proto"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapgrpc"
@@ -26,7 +27,18 @@ func main() {
 		log.Fatal(err)
 	}
 	defer lis.Close()
-	serv := order.NewServer()
+	kafkaBroker := os.Getenv("KAFKA_BROKERS")
+	if kafkaBroker == "" {
+		kafkaBroker = "localhost:9092"
+	}
+	if err := kafka.EnsureTopic(kafkaBroker, "orders", 1, 1); err != nil {
+		sugar.Warnw("failed to ensure kafka topic (may already exist, this is often OK)", "topic", "orders", "error", err)
+	} else {
+		sugar.Info("topic 'orders' ensured")
+	}
+	producer := kafka.NewProducer([]string{kafkaBroker}, "orders")
+	defer producer.Close()
+	serv := order.NewServer(producer)
 	grpcServer := grpc.NewServer()
 	pb.RegisterOrderServiceServer(grpcServer, serv)
 	sigCh := make(chan os.Signal, 1)

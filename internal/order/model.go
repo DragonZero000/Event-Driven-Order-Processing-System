@@ -14,9 +14,9 @@ type Order struct {
 }
 
 type OrderItem struct {
-	ProductID string
-	Quantity  int64
-	Price     float32
+	ProductID string  `json:"product_id"`
+	Quantity  int64   `json:"quantity"`
+	Price     float32 `json:"price"`
 }
 
 type OrderStatus int8

@@ -1,5 +1,4 @@
-# docker/Dockerfile.inventory
-FROM golang:1.21-alpine
+FROM golang:1.26.4-alpine AS builder
 
 WORKDIR /app
 
@@ -7,10 +6,14 @@ COPY go.mod go.sum ./
 RUN go mod download
 
 COPY . .
+RUN CGO_ENABLED=0 GOOS=linux go build -o /inventory-service ./cmd/inventory-service
 
-RUN go build -o /inventory-service ./cmd/inventory-service
+FROM alpine:3.20
 
-EXPOSE 8082
-EXPOSE 50053
+WORKDIR /app
+COPY --from=builder /inventory-service .
 
-CMD ["/inventory-service"]
+# gRPC порт
+EXPOSE 50051
+# Запуск
+CMD ["./inventory-service"]

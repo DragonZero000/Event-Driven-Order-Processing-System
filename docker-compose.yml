@@ -1,5 +1,5 @@
 # docker-compose.yml
-version: '3.8'
+#version: '3.8'
 
 services:
   zookeeper:
@@ -22,10 +22,18 @@ services:
       - zookeeper
     ports:
       - "9092:9092"
+    healthcheck:
+      test: ["CMD", "kafka-broker-api-versions", "--bootstrap-server", "localhost:9092"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
     environment:
       KAFKA_BROKER_ID: 1
       KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
       KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
@@ -33,6 +41,35 @@ services:
       KAFKA_JMX_HOSTNAME: kafka
     networks:
       - kafka-network
+  
+  order-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.order
+    ports:
+      - "50051:50051"
+    environment:
+      KAFKA_BROKERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-network
+   
+  inventory-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.inventory
+    ports:
+      - "50052:50051"
+    environment:
+      KAFKA_BROKERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-network
+
 
 networks:
   kafka-network:
