@@ -3,7 +3,7 @@ package inventory
 type OrderCreateEvent struct {
 	ID         string      `json:"id"`
 	CustomerID string      `json:"customer_id"`
-	OrderItems []OrderItem `json:"order_items"`
+	OrderItems []OrderItem `json:"items"`
 	Status     int         `json:"status"`
 	CreatedAt  int64       `json:"created_at"`
 }

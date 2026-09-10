@@ -69,7 +69,34 @@ services:
         condition: service_healthy
     networks:
       - kafka-network
-
+   
+  payment-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.payment
+    ports:
+      - "50053:50051"
+    environment:
+      KAFKA_BROKERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-network
+    
+  notification-service:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.notification
+    ports:
+      - "50054:50051"
+    environment:
+      KAFKA_BROKERS: kafka:29092
+    depends_on:
+      kafka:
+        condition: service_healthy
+    networks:
+      - kafka-network
 
 networks:
   kafka-network:
