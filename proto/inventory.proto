@@ -1,0 +1,16 @@
+syntax = "proto3";
+
+package inventory;
+
+option go_package = "github.com/DragonZero000/Event-Driven-Order-Processing-System/proto/inventory;inventorypb";
+
+service InventoryService {
+  rpc GetStockLevel(GetStockLevelRequest) returns (GetStockLevelResponse);
+}
+
+message GetStockLevelRequest {
+    string product_id = 1;
+}
+message GetStockLevelResponse {
+    int64 stock_quantity = 1;
+}

@@ -15,4 +15,4 @@ COPY --from=builder /payment-service .
 
 EXPOSE 50051
 
-CMD ["/payment-service"]
+CMD ["./payment-service"]
