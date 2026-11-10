@@ -40,6 +40,10 @@ func NewProducer(brokers []string, topic string) *Producer {
 			// партицию, что сохраняет порядок событий одного заказа.
 			Balancer:     &kafka.Hash{},
 			BatchTimeout: batchTimeout(),
+			// RequireAll: публикация считается успешной только после подтверждения
+			// всеми синхронными репликами (у kafka.Writer по умолчанию RequireNone —
+			// запись без подтверждения, при которой ошибки брокера не возвращаются).
+			RequiredAcks: kafka.RequireAll,
 		},
 	}
 }

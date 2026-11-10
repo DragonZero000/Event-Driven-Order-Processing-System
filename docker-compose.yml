@@ -50,6 +50,8 @@ services:
       - "50051:50051"
     environment:
       KAFKA_BROKERS: kafka:29092
+      KAFKA_BATCH_TIMEOUT: ${KAFKA_BATCH_TIMEOUT:-10ms}
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -64,6 +66,8 @@ services:
       - "50052:50051"
     environment:
       KAFKA_BROKERS: kafka:29092
+      KAFKA_BATCH_TIMEOUT: ${KAFKA_BATCH_TIMEOUT:-10ms}
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -76,6 +80,8 @@ services:
       dockerfile: docker/Dockerfile.payment
     environment:
       KAFKA_BROKERS: kafka:29092
+      KAFKA_BATCH_TIMEOUT: ${KAFKA_BATCH_TIMEOUT:-10ms}
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy
@@ -88,6 +94,8 @@ services:
       dockerfile: docker/Dockerfile.notification
     environment:
       KAFKA_BROKERS: kafka:29092
+      KAFKA_BATCH_TIMEOUT: ${KAFKA_BATCH_TIMEOUT:-10ms}
+    restart: unless-stopped
     depends_on:
       kafka:
         condition: service_healthy

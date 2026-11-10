@@ -20,7 +20,12 @@ func NewConsumer(brokers []string, topic, groupID string) *Consumer {
 		log.Printf("kafka: failed to ensure DLT %s.dlq: %v", topic, err)
 	}
 	return &Consumer{
-		dlq: &kafka.Writer{Addr: kafka.TCP(brokers...), Topic: topic + ".dlq", BatchTimeout: batchTimeout()},
+		dlq: &kafka.Writer{
+			Addr:         kafka.TCP(brokers...),
+			Topic:        topic + ".dlq",
+			BatchTimeout: batchTimeout(),
+			RequiredAcks: kafka.RequireAll,
+		},
 		reader: kafka.NewReader(kafka.ReaderConfig{
 			Brokers: brokers,
 			Topic:   topic,
