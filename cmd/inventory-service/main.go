@@ -36,6 +36,11 @@ func main() {
 	sugar.Infow("kafka connection established", "broker", kafkaBroker, "topic", "orders", "group", "inventory-service")
 	grpcServer := grpc.NewServer()
 	handler := inventory.NewHandler(startInventory())
+	for _, t := range []string{inventory.TopicStockReserved, inventory.TopicStockRejected} {
+		if err := kafka.EnsureTopic(kafkaBroker, t, 3, 1); err != nil {
+			sugar.Warnw("failed to ensure kafka topic (may already exist)", "topic", t, "error", err)
+		}
+	}
 	reservedProducer := kafka.NewProducer([]string{kafkaBroker}, inventory.TopicStockReserved)
 	rejectedProducer := kafka.NewProducer([]string{kafkaBroker}, inventory.TopicStockRejected)
 	defer reservedProducer.Close()
@@ -49,12 +54,13 @@ func main() {
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	consErrCh := make(chan error, 1)
+	payErrCh := make(chan error, 1)
 	grpcServErrCh := make(chan error, 1)
 	go func() {
 		consErrCh <- consumer.Consume(ctx, handler.Handle)
 	}()
 	go func() {
-		_ = paymentConsumer.Consume(ctx, handler.HandlePayment)
+		payErrCh <- paymentConsumer.Consume(ctx, handler.HandlePayment)
 	}()
 	go func() {
 		grpcServErrCh <- grpcServer.Serve(lis)
@@ -67,11 +73,17 @@ func main() {
 		if err != nil {
 			sugar.Errorf("Error consuming: %s", err.Error())
 		}
+	case err := <-payErrCh:
+		if err != nil {
+			sugar.Errorf("Error consuming payment events: %s", err.Error())
+		}
 	case err := <-grpcServErrCh:
 		if err != nil {
 			sugar.Errorw("Error serving gRPC: %s", "error", err)
 		}
 	}
+	cancel()
+	grpcServer.GracefulStop()
 	sugar.Info("Inventory service is stopped")
 }
 

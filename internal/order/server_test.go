@@ -6,7 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	pb "github.com/DragonZero000/Event-Driven-Order-Processing-System/proto"
+	pb "github.com/DragonZero000/Event-Driven-Order-Processing-System/proto/order"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )

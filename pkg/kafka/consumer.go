@@ -10,10 +10,12 @@ import (
 
 type Consumer struct {
 	reader *kafka.Reader
+	dlq    *kafka.Writer // Dead Letter Topic: <topic>.dlq
 }
 
 func NewConsumer(brokers []string, topic, groupID string) *Consumer {
 	return &Consumer{
+		dlq: &kafka.Writer{Addr: kafka.TCP(brokers...), Topic: topic + ".dlq"},
 		reader: kafka.NewReader(kafka.ReaderConfig{
 			Brokers: brokers,
 			Topic:   topic,
@@ -39,9 +41,12 @@ func (c *Consumer) Consume(ctx context.Context, handler Handler) error {
 			if ctx.Err() != nil {
 				return ctx.Err()
 			}
-			// "Ядовитое" сообщение: коммитим смещение, чтобы не блокировать партицию.
-			// В production его следует отправлять в Dead Letter Topic.
-			log.Printf("kafka: dropping message key=%s after %d attempts: %v", msg.Key, maxAttempts, err)
+			// "Ядовитое" сообщение: отправляем в Dead Letter Topic и коммитим смещение,
+			// чтобы не блокировать партицию. Разбор DLT — вручную/отдельным сервисом.
+			log.Printf("kafka: message key=%s failed after %d attempts, sending to DLT: %v", msg.Key, maxAttempts, err)
+			if dlqErr := c.dlq.WriteMessages(ctx, kafka.Message{Key: msg.Key, Value: msg.Value}); dlqErr != nil {
+				return dlqErr // без DLT сообщение терять нельзя — не коммитим
+			}
 		}
 		if err := c.reader.CommitMessages(ctx, msg); err != nil {
 			return err
@@ -67,5 +72,6 @@ func handleWithRetry(ctx context.Context, h Handler, key, value []byte) error {
 }
 
 func (c *Consumer) Close() error {
+	_ = c.dlq.Close()
 	return c.reader.Close()
 }

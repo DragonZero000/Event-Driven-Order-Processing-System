@@ -74,9 +74,6 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.payment
-    ports:
-      - "50053:50051"
-    environment:
       KAFKA_BROKERS: kafka:29092
     depends_on:
       kafka:
@@ -88,9 +85,6 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.notification
-    ports:
-      - "50054:50051"
-    environment:
       KAFKA_BROKERS: kafka:29092
     depends_on:
       kafka:

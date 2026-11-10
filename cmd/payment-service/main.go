@@ -22,6 +22,9 @@ func main() {
 		kafkaBroker = "localhost:9092"
 	}
 
+	if err := kafka.EnsureTopic(kafkaBroker, "payment", 3, 1); err != nil {
+		sugar.Warnw("failed to ensure kafka topic (may already exist)", "topic", "payment", "error", err)
+	}
 	consumer := kafka.NewConsumer([]string{kafkaBroker}, "stock-reserved", "payment-service")
 	producer := kafka.NewProducer([]string{kafkaBroker}, "payment")
 	defer consumer.Close()

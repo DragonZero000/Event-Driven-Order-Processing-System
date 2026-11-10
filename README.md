@@ -104,7 +104,7 @@ sequenceDiagram
 | Топик | Производитель | Потребители (consumer group) | Поля |
 |---|---|---|---|
 | `orders` | order | inventory, notification | `id, customer_id, items[], total_price, status, created_at` |
-| `stock-reserved` | inventory | payment | `id, customer_id, total_price` |
+| `stock-reserved` | inventory | payment, order (→ PROCESSING) | `id, customer_id, total_price` |
 | `stock-rejected` | inventory | order | `id, customer_id, total_price, reason` |
 | `payment` | payment | order, inventory, notification | `order_id, status (0/1), amount` |
 
@@ -129,8 +129,8 @@ flowchart TB
         ZK[zookeeper :2181] --- KF[kafka :9092/29092]
         OS[order-service :50051]
         IS[inventory-service :50052]
-        PS[payment-service :50053]
-        NS[notification-service :50054]
+        PS[payment-service]
+        NS[notification-service]
     end
     OS & IS & PS & NS -- KAFKA_BROKERS=kafka:29092 --> KF
 ```
@@ -144,8 +144,8 @@ CI/CD в проекте не настроен; рекомендуемый мин
 | Event-Driven / Pub-Sub | обмен между сервисами через топики Kafka |
 | Saga (choreography) + компенсирующая транзакция | `stock-reserved → payment`, снятие резерва в `inventory.HandlePayment` |
 | Idempotent Consumer | `processed`/`paymentEvents`/статусы финальны в `order.setStatus` |
-| Database per service | у каждого сервиса собственное состояние |
-| Retry + poison message | `pkg/kafka/consumer.go` (3 попытки, затем пропуск; в production — DLT) |
+| Database per service (логически) | у каждого сервиса собственное in-memory состояние; физически БД нет — см. ограничения |
+| Retry + poison message | `pkg/kafka/consumer.go` (3 попытки, затем Dead Letter Topic `<topic>.dlq`) |
 | Ports & Adapters | интерфейсы `eventPublisher`, `PaymentGateway` позволяют подменять инфраструктуру в тестах |
 | CQRS (применимо) | запись — события, чтение — `GetOrder`/`GetStockLevel`; полноценное разделение — направление развития |
 | DDD | границы сервисов совпадают с ограниченными контекстами: Orders, Inventory, Payment, Notification |
@@ -181,72 +181,32 @@ grpcurl -plaintext -import-path proto -proto order.proto \
 
 Сценарии: сумма ≤ 200 — заказ `COMPLETED`; сумма > 200 — оплата отклонена, заказ `CANCELLED`, резерв снят; товара нет на складе (`soup`: 10, `bread`: 25) — `CANCELLED`.
 
-## Ограничения прототипа и дальнейшее развитие
+Порты хоста: `order-service` — 50051, `inventory-service` — 50052 (gRPC); Kafka — `localhost:9092` с хоста и `kafka:29092` внутри сети Docker. `payment-service` и `notification-service` — только потребители/производители Kafka, gRPC-портов у них нет. Отдельный сервис можно запустить локально: `KAFKA_BROKERS=localhost:9092 go run ./cmd/order-service`.
 
-- Состояние хранится в памяти: после перезапуска теряется. Следующий шаг — PostgreSQL и **Transactional Outbox**, чтобы запись заказа и публикация события были атомарны (сейчас при сбое публикации заказ остаётся без события).
-- JSON вместо Protobuf/Schema Registry для событий; нет версионирования схем.
-- Одна партиция и один брокер (replication factor 1); топики, кроме `orders`, создаются автоматически брокером.
-- Нет Dead Letter Topic, метрик (Prometheus), трассировки (OpenTelemetry), аутентификации gRPC (TLS/JWT).
-- `notification-service` пока только логирует уведомления.
+Тестирование: `go test ./... -race`.
 
----
-
-## Структура проекта и локальный запуск
-
+## Структура проекта
 
 ```
-cmd/                    Service entrypoints (main.go per service)
-  order-service/
-  inventory-service/
-  payment-service/
-  notification-service/
-internal/               Business logic per service
-  order/                gRPC server, in-memory order store, OrderCreated event
-  inventory/            Kafka handler + gRPC stock-level API
-  payment/              Kafka handler + simulated payment gateway
-  notification/         Kafka handlers for order/payment events
-pkg/kafka/               Shared Kafka producer/consumer wrappers
-proto/                  Protobuf definitions and generated gRPC code
-docker/                 Per-service Dockerfiles
-docker-compose.yml      Zookeeper, Kafka, and all four services
+cmd/<service>/main.go   точки входа сервисов
+internal/order          gRPC-сервер, хранилище заказов, обработчики событий саги
+internal/inventory      резервирование, компенсация, gRPC GetStockLevel
+internal/payment        обработчик stock-reserved, эмулятор платёжного шлюза
+internal/notification   обработчики событий orders/payment
+pkg/kafka               общие producer/consumer (retry, Dead Letter Topic)
+proto/                  .proto и сгенерированный код (proto/order, proto/inventory)
+docker/                 Dockerfile каждого сервиса
 ```
 
-## Running locally
+## Допущения и ограничения прототипа
 
-### Prerequisites
+Их следует прямо указать в отчёте как осознанные допущения MVP.
 
-- Go 1.26+
-- Docker and Docker Compose
-
-### With Docker Compose (recommended)
-
-Builds and starts Zookeeper, Kafka, and all four services:
-
-```bash
-docker compose up --build
-```
-
-Service gRPC ports (mapped to the host):
-
-| Service              | Host port |
-|----------------------|-----------|
-| order-service        | 50051     |
-| inventory-service    | 50052     |
-| payment-service      | 50053     |
-| notification-service | 50054     |
-
-Kafka is reachable at `localhost:9092` from the host and `kafka:29092` from within the Docker network.
-
-### Running a service directly
-
-Each service reads its Kafka broker address from the `KAFKA_BROKERS` environment variable (defaults to `localhost:9092`):
-
-```bash
-go run ./cmd/order-service
-```
-
-## Тестирование
-
-```bash
-go test ./... -race
-```
+- **Состояние в памяти.** Принцип «database per service» соблюдён лишь логически: у каждого сервиса своё хранилище, но оно in-memory и теряется при перезапуске. Следующий шаг — PostgreSQL на сервис и **Transactional Outbox**: сейчас при сбое публикации заказ откатывается, а клиент получает `Unavailable`, но с реальной БД запись и публикация должны быть атомарны.
+- **Валидация.** `CreateOrder` отклоняет пустой заказ, неположительные количество/цену и пустые идентификаторы (`InvalidArgument`); склад дополнительно защищён от некорректного количества.
+- **Сообщения, не прошедшие обработку.** После 3 попыток сообщение отправляется в Dead Letter Topic `<topic>.dlq`. Автоматической обработки DLT и таймаутов саги нет — застрявший заказ остаётся в `PENDING`/`PROCESSING`.
+- **Деньги в `float32`.** Допущение MVP; в production — целые минимальные единицы (копейки) или decimal.
+- **Масштабирование.** Топики создаются с 3 партициями, но брокер один (replication factor 1); экземпляры сервисов хранят состояние в памяти, поэтому для горизонтального масштабирования нужна внешняя БД.
+- **События — JSON**, без Schema Registry и версионирования.
+- **Нет e2e-теста** с реальным брокером (тесты модульные, Kafka подменена); не реализованы healthcheck сервисов, метрики (Prometheus), трассировка (OpenTelemetry), TLS/JWT для gRPC.
+- `notification-service` только логирует уведомления.

@@ -13,6 +13,5 @@ FROM alpine:3.20
 WORKDIR /app
 COPY --from=builder /payment-service .
 
-EXPOSE 50051
 
 CMD ["./payment-service"]

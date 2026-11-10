@@ -6,11 +6,12 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 
 	order "github.com/DragonZero000/Event-Driven-Order-Processing-System/internal/order"
 	"github.com/DragonZero000/Event-Driven-Order-Processing-System/pkg/kafka"
-	pb "github.com/DragonZero000/Event-Driven-Order-Processing-System/proto"
+	pb "github.com/DragonZero000/Event-Driven-Order-Processing-System/proto/order"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapgrpc"
 	"google.golang.org/grpc"
@@ -32,38 +33,61 @@ func main() {
 	if kafkaBroker == "" {
 		kafkaBroker = "localhost:9092"
 	}
-	if err := kafka.EnsureTopic(kafkaBroker, "orders", 1, 1); err != nil {
-		sugar.Warnw("failed to ensure kafka topic (may already exist, this is often OK)", "topic", "orders", "error", err)
-	} else {
-		sugar.Info("topic 'orders' ensured")
+	brokers := []string{kafkaBroker}
+	// Топики создаются заранее, чтобы потребители не стартовали раньше них.
+	for _, t := range []string{"orders", "stock-reserved", "stock-rejected", "payment"} {
+		if err := kafka.EnsureTopic(kafkaBroker, t, 3, 1); err != nil {
+			sugar.Warnw("failed to ensure kafka topic (may already exist)", "topic", t, "error", err)
+		}
 	}
-	producer := kafka.NewProducer([]string{kafkaBroker}, "orders")
+	producer := kafka.NewProducer(brokers, "orders")
 	defer producer.Close()
 	serv := order.NewServer(producer)
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rejectedConsumer := kafka.NewConsumer([]string{kafkaBroker}, "stock-rejected", "order-service-stock")
-	paymentConsumer := kafka.NewConsumer([]string{kafkaBroker}, "payment", "order-service-payment")
-	defer rejectedConsumer.Close()
-	defer paymentConsumer.Close()
-	go func() { _ = rejectedConsumer.Consume(ctx, serv.HandleStockRejected) }()
-	go func() { _ = paymentConsumer.Consume(ctx, serv.HandlePayment) }()
+	consumers := map[string]struct {
+		c *kafka.Consumer
+		h kafka.Handler
+	}{
+		"stock-reserved": {kafka.NewConsumer(brokers, "stock-reserved", "order-service-reserved"), serv.HandleStockReserved},
+		"stock-rejected": {kafka.NewConsumer(brokers, "stock-rejected", "order-service-rejected"), serv.HandleStockRejected},
+		"payment":        {kafka.NewConsumer(brokers, "payment", "order-service-payment"), serv.HandlePayment},
+	}
+	var wg sync.WaitGroup
+	consErrCh := make(chan error, len(consumers))
+	for topic, cs := range consumers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := cs.c.Consume(ctx, cs.h); err != nil && ctx.Err() == nil {
+				sugar.Errorw("consumer failed", "topic", topic, "error", err)
+				consErrCh <- err
+			}
+		}()
+	}
+
 	grpcServer := grpc.NewServer()
 	pb.RegisterOrderServiceServer(grpcServer, serv)
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	serveErrCh := make(chan error, 1)
-	go func() {
-		serveErrCh <- grpcServer.Serve(lis)
-	}()
+	go func() { serveErrCh <- grpcServer.Serve(lis) }()
 	select {
 	case sig := <-sigCh:
 		sugar.Infow("received signal, shutting down", "signal", sig.String())
-		grpcServer.GracefulStop()
-	case serveErr := <-serveErrCh:
-		if serveErr != nil {
-			sugar.Errorw("grpc server failed unexpectedly", "error", serveErr)
+	case err := <-consErrCh:
+		sugar.Errorw("shutting down: consumer error", "error", err)
+	case err := <-serveErrCh:
+		if err != nil {
+			sugar.Errorw("grpc server failed unexpectedly", "error", err)
 		}
+	}
+	grpcServer.GracefulStop()
+	cancel()
+	wg.Wait()
+	for _, cs := range consumers {
+		cs.c.Close()
 	}
 	sugar.Info("Order Service stopped")
 }

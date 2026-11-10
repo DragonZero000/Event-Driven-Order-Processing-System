@@ -51,3 +51,13 @@ func TestSaga_PaymentSuccessKeepsReservation(t *testing.T) {
 		t.Fatalf("stock = %d, want 3", h.stock["soup"])
 	}
 }
+
+func TestHandle_NegativeQuantityRejected(t *testing.T) {
+	h := NewHandler(map[string]int64{"soup": 5})
+	ok, bad := &recPub{}, &recPub{}
+	h.SetPublishers(ok, bad)
+	_ = h.Handle(context.Background(), nil, []byte(`{"id":"o1","items":[{"product_id":"soup","quantity":-4}]}`))
+	if h.stock["soup"] != 5 || len(bad.keys) != 1 || len(ok.keys) != 0 {
+		t.Fatalf("stock=%d rejected=%d reserved=%d", h.stock["soup"], len(bad.keys), len(ok.keys))
+	}
+}

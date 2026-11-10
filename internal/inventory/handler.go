@@ -48,9 +48,15 @@ func (h *Handler) Handle(ctx context.Context, key, value []byte) error {
 		return nil
 	}
 	for _, item := range event.OrderItems {
-		if h.stock[item.ProductID] < int64(item.Quantity) {
-			log.Printf("order %s cannot be fulfilled: insufficient stock for %s", event.ID, item.ProductID)
-			if err := h.emit(ctx, h.rejectedP, event, "insufficient stock: "+item.ProductID); err != nil {
+		reason := ""
+		if item.Quantity <= 0 {
+			reason = "invalid quantity: " + item.ProductID
+		} else if h.stock[item.ProductID] < int64(item.Quantity) {
+			reason = "insufficient stock: " + item.ProductID
+		}
+		if reason != "" {
+			log.Printf("order %s rejected: %s", event.ID, reason)
+			if err := h.emit(ctx, h.rejectedP, event, reason); err != nil {
 				return err // не помечаем обработанным — сообщение будет повторено
 			}
 			h.processed[event.ID] = true

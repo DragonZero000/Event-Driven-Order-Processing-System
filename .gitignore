@@ -1,2 +1,9 @@
 .postman
 postman
+bin/
+*.exe
+*.test
+*.out
+.idea/
+.vscode/
+.env

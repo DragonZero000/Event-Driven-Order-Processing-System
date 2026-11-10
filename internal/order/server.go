@@ -11,7 +11,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
-	pb "github.com/DragonZero000/Event-Driven-Order-Processing-System/proto"
+	pb "github.com/DragonZero000/Event-Driven-Order-Processing-System/proto/order"
 )
 
 type Server struct {
@@ -28,9 +28,30 @@ func NewServer(eventPublish eventPublisher) *Server {
 	}
 }
 
+func validateCreateOrder(req *pb.CreateOrderRequest) error {
+	if req.CustomerId == "" {
+		return status.Error(codes.InvalidArgument, "customer_id is required")
+	}
+	if len(req.Items) == 0 {
+		return status.Error(codes.InvalidArgument, "order must contain at least one item")
+	}
+	for _, it := range req.Items {
+		switch {
+		case it == nil || it.ProductId == "":
+			return status.Error(codes.InvalidArgument, "item product_id is required")
+		case it.Quantity <= 0:
+			return status.Errorf(codes.InvalidArgument, "item %s: quantity must be positive", it.ProductId)
+		case it.Price <= 0:
+			return status.Errorf(codes.InvalidArgument, "item %s: price must be positive", it.ProductId)
+		}
+	}
+	return nil
+}
+
 func (s *Server) CreateOrder(ctx context.Context, req *pb.CreateOrderRequest) (*pb.CreateOrderResponse, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	if err := validateCreateOrder(req); err != nil {
+		return nil, err
+	}
 	order := &Order{
 		ID:         uuid.New().String(),
 		CustomerID: req.CustomerId,
@@ -39,7 +60,6 @@ func (s *Server) CreateOrder(ctx context.Context, req *pb.CreateOrderRequest) (*
 		CreatedAt:  time.Now(),
 	}
 	order.TotalPrice = TotalOrderPrice(order)
-	s.orders[order.ID] = order
 	event := OrderCreatedEvent{
 		ID:         order.ID,
 		CustomerID: order.CustomerID,
@@ -50,13 +70,23 @@ func (s *Server) CreateOrder(ctx context.Context, req *pb.CreateOrderRequest) (*
 	}
 	jsonData, err := json.Marshal(event)
 	if err != nil {
-		slog.Error("failed to marshal event", "order_id", order.ID, "error", err)
-	} else if err = s.eventPublish.Publish(ctx, order.ID, jsonData); err != nil {
-		slog.Error("failed to publish order creatd event", "order_id", order.ID, "error", err)
+		return nil, status.Error(codes.Internal, "failed to encode order event")
 	}
-	return &pb.CreateOrderResponse{
-		OrderId: order.ID,
-	}, nil
+	// Заказ сохраняется до публикации (ответные события не опередят запись), а сама
+	// публикация идёт без глобальной блокировки. При сбое Kafka заказ откатывается,
+	// клиент получает Unavailable и может повторить запрос. Атомарность с реальной БД
+	// обеспечивает паттерн Transactional Outbox (см. README).
+	s.mu.Lock()
+	s.orders[order.ID] = order
+	s.mu.Unlock()
+	if err := s.eventPublish.Publish(ctx, order.ID, jsonData); err != nil {
+		slog.Error("failed to publish order created event", "order_id", order.ID, "error", err)
+		s.mu.Lock()
+		delete(s.orders, order.ID)
+		s.mu.Unlock()
+		return nil, status.Error(codes.Unavailable, "order was not accepted, please retry")
+	}
+	return &pb.CreateOrderResponse{OrderId: order.ID}, nil
 }
 
 func (s *Server) GetOrder(ctx context.Context, req *pb.GetOrderRequest) (*pb.GetOrderResponse, error) {
@@ -159,4 +189,20 @@ func (s *Server) setStatus(id string, st OrderStatus) {
 		return
 	}
 	o.Status = st
+}
+
+// HandleStockReserved — событие stock-reserved: заказ переходит в PROCESSING (ожидает оплаты).
+func (s *Server) HandleStockReserved(ctx context.Context, key, value []byte) error {
+	var ev struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(value, &ev); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if o := s.orders[ev.ID]; o != nil && o.Status == Pending {
+		o.Status = Processing
+	}
+	return nil
 }
