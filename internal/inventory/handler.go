@@ -47,11 +47,17 @@ func (h *Handler) Handle(ctx context.Context, key, value []byte) error {
 		log.Printf("order %s already processed, skipping", event.ID)
 		return nil
 	}
+	// Потребность суммируется по товару: позиции с одинаковым product_id
+	// не должны пройти проверку по отдельности и увести остаток в минус.
+	need := make(map[string]int64, len(event.OrderItems))
+	for _, item := range event.OrderItems {
+		need[item.ProductID] += int64(item.Quantity)
+	}
 	for _, item := range event.OrderItems {
 		reason := ""
 		if item.Quantity <= 0 {
 			reason = "invalid quantity: " + item.ProductID
-		} else if h.stock[item.ProductID] < int64(item.Quantity) {
+		} else if h.stock[item.ProductID] < need[item.ProductID] {
 			reason = "insufficient stock: " + item.ProductID
 		}
 		if reason != "" {

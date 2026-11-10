@@ -24,8 +24,10 @@ func main() {
 
 	orderConsumer := kafka.NewConsumer([]string{kafkaBroker}, "orders", "notification-service-order")
 	paymentConsumer := kafka.NewConsumer([]string{kafkaBroker}, "payment", "notification-service-payment")
+	rejectedConsumer := kafka.NewConsumer([]string{kafkaBroker}, "stock-rejected", "notification-service-rejected")
 	defer orderConsumer.Close()
 	defer paymentConsumer.Close()
+	defer rejectedConsumer.Close()
 	handler := notification.NewHandler()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -33,11 +35,15 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	orderConsErrCh := make(chan error, 1)
 	paymentConsErrCh := make(chan error, 1)
+	rejectedConsErrCh := make(chan error, 1)
 	go func() {
 		orderConsErrCh <- orderConsumer.Consume(ctx, handler.HandleOrderEvent)
 	}()
 	go func() {
 		paymentConsErrCh <- paymentConsumer.Consume(ctx, handler.HandlePaymentEvent)
+	}()
+	go func() {
+		rejectedConsErrCh <- rejectedConsumer.Consume(ctx, handler.HandleStockRejectedEvent)
 	}()
 	select {
 	case sig := <-sigCh:
@@ -51,6 +57,11 @@ func main() {
 	case err := <-paymentConsErrCh:
 		if err != nil {
 			sugar.Errorf("Error consuming payments events: %s", err.Error())
+		}
+		cancel()
+	case err := <-rejectedConsErrCh:
+		if err != nil {
+			sugar.Errorf("Error consuming stock-rejected events: %s", err.Error())
 		}
 		cancel()
 	}

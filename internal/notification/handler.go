@@ -8,10 +8,30 @@ import (
 )
 
 type Handler struct {
-	mu                        sync.Mutex
-	notificationEvents        map[string]*notificationState
-	orderNotificationsCount   int
-	paymentNotificationsCount int
+	mu                         sync.Mutex
+	notificationEvents         map[string]*notificationState
+	orderNotificationsCount    int
+	paymentNotificationsCount  int
+	rejectedNotificationsCount int
+}
+
+// HandleStockRejectedEvent уведомляет клиента об отмене заказа из-за нехватки товара.
+func (h *Handler) HandleStockRejectedEvent(ctx context.Context, key, value []byte) error {
+	var event StockRejectedEvent
+	if err := json.Unmarshal(value, &event); err != nil {
+		return err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	state := h.stateFor(event.ID)
+	if state.rejectedStatus {
+		log.Printf("cancellation notification for %s already sent, skipping", event.ID)
+		return nil
+	}
+	log.Printf("sending cancellation notification for %s (%s)", event.ID, event.Reason)
+	state.rejectedStatus = true
+	h.rejectedNotificationsCount++
+	return nil
 }
 
 func NewHandler() *Handler {

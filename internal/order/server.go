@@ -35,15 +35,19 @@ func validateCreateOrder(req *pb.CreateOrderRequest) error {
 	if len(req.Items) == 0 {
 		return status.Error(codes.InvalidArgument, "order must contain at least one item")
 	}
+	seen := make(map[string]bool, len(req.Items))
 	for _, it := range req.Items {
 		switch {
 		case it == nil || it.ProductId == "":
 			return status.Error(codes.InvalidArgument, "item product_id is required")
+		case seen[it.ProductId]:
+			return status.Errorf(codes.InvalidArgument, "item %s: duplicate product_id", it.ProductId)
 		case it.Quantity <= 0:
 			return status.Errorf(codes.InvalidArgument, "item %s: quantity must be positive", it.ProductId)
 		case it.Price <= 0:
 			return status.Errorf(codes.InvalidArgument, "item %s: price must be positive", it.ProductId)
 		}
+		seen[it.ProductId] = true
 	}
 	return nil
 }
@@ -180,12 +184,16 @@ func (s *Server) HandlePayment(ctx context.Context, key, value []byte) error {
 	return nil
 }
 
-// setStatus идемпотентен и не меняет заказ, уже находящийся в финальном состоянии.
+// setStatus — единственная точка смены статуса заказа. Идемпотентен: заказ
+// в финальном состоянии не меняется, а в PROCESSING можно перейти только из PENDING.
 func (s *Server) setStatus(id string, st OrderStatus) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	o := s.orders[id]
 	if o == nil || o.Status == Completed || o.Status == Cancelled {
+		return
+	}
+	if st == Processing && o.Status != Pending {
 		return
 	}
 	o.Status = st
@@ -199,10 +207,6 @@ func (s *Server) HandleStockReserved(ctx context.Context, key, value []byte) err
 	if err := json.Unmarshal(value, &ev); err != nil {
 		return err
 	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if o := s.orders[ev.ID]; o != nil && o.Status == Pending {
-		o.Status = Processing
-	}
+	s.setStatus(ev.ID, Processing)
 	return nil
 }

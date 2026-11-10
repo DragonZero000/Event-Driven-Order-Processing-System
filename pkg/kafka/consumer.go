@@ -14,8 +14,13 @@ type Consumer struct {
 }
 
 func NewConsumer(brokers []string, topic, groupID string) *Consumer {
+	// Dead Letter Topic создаётся заранее: kafka.Writer сам топики не создаёт,
+	// и без этого первое же «ядовитое» сообщение остановило бы потребителя.
+	if err := EnsureTopic(brokers[0], topic+".dlq", 1, 1); err != nil {
+		log.Printf("kafka: failed to ensure DLT %s.dlq: %v", topic, err)
+	}
 	return &Consumer{
-		dlq: &kafka.Writer{Addr: kafka.TCP(brokers...), Topic: topic + ".dlq"},
+		dlq: &kafka.Writer{Addr: kafka.TCP(brokers...), Topic: topic + ".dlq", BatchTimeout: batchTimeout()},
 		reader: kafka.NewReader(kafka.ReaderConfig{
 			Brokers: brokers,
 			Topic:   topic,

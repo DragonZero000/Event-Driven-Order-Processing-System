@@ -20,6 +20,12 @@ type PaymentEvent struct {
 	Amount float64       `json:"amount"`
 }
 
+// StockRejectedEvent — заказ отменён складом из-за нехватки товара.
+type StockRejectedEvent struct {
+	ID     string `json:"id"`
+	Reason string `json:"reason"`
+}
+
 type paymentStatus int
 
 const (
@@ -28,6 +34,7 @@ const (
 )
 
 type notificationState struct {
-	paymentStatus bool
-	orderStatus   bool
+	paymentStatus  bool
+	orderStatus    bool
+	rejectedStatus bool
 }
