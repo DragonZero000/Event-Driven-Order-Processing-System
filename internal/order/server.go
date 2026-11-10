@@ -120,3 +120,43 @@ type OrderCreatedEvent struct {
 type eventPublisher interface {
 	Publish(ctx context.Context, key string, value []byte) error
 }
+
+// HandleStockRejected — событие stock-rejected от склада: заказ отменяется.
+func (s *Server) HandleStockRejected(ctx context.Context, key, value []byte) error {
+	var ev struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(value, &ev); err != nil {
+		return err
+	}
+	s.setStatus(ev.ID, Cancelled)
+	return nil
+}
+
+// HandlePayment — событие payment: заказ завершается либо отменяется.
+func (s *Server) HandlePayment(ctx context.Context, key, value []byte) error {
+	var ev struct {
+		OrderID string `json:"order_id"`
+		Status  int    `json:"status"` // 1 — оплачен
+	}
+	if err := json.Unmarshal(value, &ev); err != nil {
+		return err
+	}
+	if ev.Status == 1 {
+		s.setStatus(ev.OrderID, Completed)
+	} else {
+		s.setStatus(ev.OrderID, Cancelled)
+	}
+	return nil
+}
+
+// setStatus идемпотентен и не меняет заказ, уже находящийся в финальном состоянии.
+func (s *Server) setStatus(id string, st OrderStatus) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	o := s.orders[id]
+	if o == nil || o.Status == Completed || o.Status == Cancelled {
+		return
+	}
+	o.Status = st
+}

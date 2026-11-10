@@ -22,11 +22,11 @@ func main() {
 		kafkaBroker = "localhost:9092"
 	}
 
-	consumer := kafka.NewConsumer([]string{kafkaBroker}, "orders", "payment-service")
+	consumer := kafka.NewConsumer([]string{kafkaBroker}, "stock-reserved", "payment-service")
 	producer := kafka.NewProducer([]string{kafkaBroker}, "payment")
 	defer consumer.Close()
 	defer producer.Close()
-	sugar.Infow("kafka connection established", "broker", kafkaBroker, "topic", "orders", "group", "payment-service")
+	sugar.Infow("kafka connection established", "broker", kafkaBroker, "topic", "stock-reserved", "group", "payment-service")
 	paymentGateway := payment.NewSimulatedPaymentGateway()
 	handler := payment.NewHandler(producer, paymentGateway)
 	ctx, cancel := context.WithCancel(context.Background())

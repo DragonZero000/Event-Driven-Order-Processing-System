@@ -36,6 +36,13 @@ func main() {
 	sugar.Infow("kafka connection established", "broker", kafkaBroker, "topic", "orders", "group", "inventory-service")
 	grpcServer := grpc.NewServer()
 	handler := inventory.NewHandler(startInventory())
+	reservedProducer := kafka.NewProducer([]string{kafkaBroker}, inventory.TopicStockReserved)
+	rejectedProducer := kafka.NewProducer([]string{kafkaBroker}, inventory.TopicStockRejected)
+	defer reservedProducer.Close()
+	defer rejectedProducer.Close()
+	handler.SetPublishers(reservedProducer, rejectedProducer)
+	paymentConsumer := kafka.NewConsumer([]string{kafkaBroker}, "payment", "inventory-service-payment")
+	defer paymentConsumer.Close()
 	pb.RegisterInventoryServiceServer(grpcServer, handler)
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -45,6 +52,9 @@ func main() {
 	grpcServErrCh := make(chan error, 1)
 	go func() {
 		consErrCh <- consumer.Consume(ctx, handler.Handle)
+	}()
+	go func() {
+		_ = paymentConsumer.Consume(ctx, handler.HandlePayment)
 	}()
 	go func() {
 		grpcServErrCh <- grpcServer.Serve(lis)

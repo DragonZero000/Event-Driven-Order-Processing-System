@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"log"
 	"net"
 	"os"
@@ -39,6 +40,14 @@ func main() {
 	producer := kafka.NewProducer([]string{kafkaBroker}, "orders")
 	defer producer.Close()
 	serv := order.NewServer(producer)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rejectedConsumer := kafka.NewConsumer([]string{kafkaBroker}, "stock-rejected", "order-service-stock")
+	paymentConsumer := kafka.NewConsumer([]string{kafkaBroker}, "payment", "order-service-payment")
+	defer rejectedConsumer.Close()
+	defer paymentConsumer.Close()
+	go func() { _ = rejectedConsumer.Consume(ctx, serv.HandleStockRejected) }()
+	go func() { _ = paymentConsumer.Consume(ctx, serv.HandlePayment) }()
 	grpcServer := grpc.NewServer()
 	pb.RegisterOrderServiceServer(grpcServer, serv)
 	sigCh := make(chan os.Signal, 1)
