@@ -188,3 +188,65 @@ grpcurl -plaintext -import-path proto -proto order.proto \
 - Одна партиция и один брокер (replication factor 1); топики, кроме `orders`, создаются автоматически брокером.
 - Нет Dead Letter Topic, метрик (Prometheus), трассировки (OpenTelemetry), аутентификации gRPC (TLS/JWT).
 - `notification-service` пока только логирует уведомления.
+
+---
+
+## Структура проекта и локальный запуск
+
+
+```
+cmd/                    Service entrypoints (main.go per service)
+  order-service/
+  inventory-service/
+  payment-service/
+  notification-service/
+internal/               Business logic per service
+  order/                gRPC server, in-memory order store, OrderCreated event
+  inventory/            Kafka handler + gRPC stock-level API
+  payment/              Kafka handler + simulated payment gateway
+  notification/         Kafka handlers for order/payment events
+pkg/kafka/               Shared Kafka producer/consumer wrappers
+proto/                  Protobuf definitions and generated gRPC code
+docker/                 Per-service Dockerfiles
+docker-compose.yml      Zookeeper, Kafka, and all four services
+```
+
+## Running locally
+
+### Prerequisites
+
+- Go 1.26+
+- Docker and Docker Compose
+
+### With Docker Compose (recommended)
+
+Builds and starts Zookeeper, Kafka, and all four services:
+
+```bash
+docker compose up --build
+```
+
+Service gRPC ports (mapped to the host):
+
+| Service              | Host port |
+|----------------------|-----------|
+| order-service        | 50051     |
+| inventory-service    | 50052     |
+| payment-service      | 50053     |
+| notification-service | 50054     |
+
+Kafka is reachable at `localhost:9092` from the host and `kafka:29092` from within the Docker network.
+
+### Running a service directly
+
+Each service reads its Kafka broker address from the `KAFKA_BROKERS` environment variable (defaults to `localhost:9092`):
+
+```bash
+go run ./cmd/order-service
+```
+
+## Тестирование
+
+```bash
+go test ./... -race
+```
