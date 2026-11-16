@@ -48,8 +48,10 @@
 
 ```mermaid
 flowchart LR
-    C[Клиент] -- "gRPC CreateOrder / GetOrder" --> O[order-service]
-    C -- "gRPC GetStockLevel" --> I[inventory-service]
+    U[Браузер: Vue SPA] -- "REST/JSON" --> G[api-gateway]
+    G -- "gRPC CreateOrder / GetOrder" --> O[order-service]
+    G -- "gRPC GetStockLevel" --> I[inventory-service]
+    C[gRPC-клиент] -- "gRPC CreateOrder / GetOrder" --> O
     O -- "orders" --> K[(Kafka)]
     K -- "orders" --> I
     K -- "orders" --> N[notification-service]
@@ -127,6 +129,9 @@ erDiagram
 flowchart TB
     subgraph Docker Compose / сеть kafka-network
         ZK[zookeeper :2181] --- KF[kafka :9092/29092]
+        FE[frontend nginx :3000] --> GW[gateway :8080]
+        GW --> OS
+        GW --> IS
         OS[order-service :50051]
         IS[inventory-service :50052]
         PS[payment-service]
@@ -165,7 +170,7 @@ MVC/MVVM неприменимы: у системы нет пользовател
 ## 6. Запуск и проверка
 
 ```bash
-docker compose up --build
+docker compose up --build   # фронтенд: http://localhost:3000, REST-шлюз: http://localhost:8080
 go test ./...
 ```
 
@@ -181,6 +186,8 @@ grpcurl -plaintext -import-path proto -proto order.proto \
 
 Сценарии: сумма ≤ 200 — заказ `COMPLETED`; сумма > 200 — оплата отклонена, заказ `CANCELLED`, резерв снят; товара нет на складе (`soup`: 10, `bread`: 25) — `CANCELLED`.
 
+**Фронтенд (Vue 3 + Vite).** Каталог `frontend/`: форма заказа, остатки склада и список заказов со статусами (опрос раз в 2 с — это отражает eventual consistency саги). Браузер не умеет gRPC, поэтому между ним и сервисами стоит `api-gateway` (`cmd/gateway`, REST/JSON → gRPC; `POST /api/orders`, `GET /api/orders/{id}`, `GET /api/stock/{product}`). Локальная разработка: `go run ./cmd/gateway` и `cd frontend && npm install && npm run dev` (http://localhost:5173, `/api` проксируется на :8080).
+
 Порты хоста: `order-service` — 50051, `inventory-service` — 50052 (gRPC); Kafka — `localhost:9092` с хоста и `kafka:29092` внутри сети Docker. `payment-service` и `notification-service` — только потребители/производители Kafka, gRPC-портов у них нет. Отдельный сервис можно запустить локально: `KAFKA_BROKERS=localhost:9092 go run ./cmd/order-service`.
 
 Тестирование: `go test ./... -race`.
@@ -193,6 +200,8 @@ internal/order          gRPC-сервер, хранилище заказов, о
 internal/inventory      резервирование, компенсация, gRPC GetStockLevel
 internal/payment        обработчик stock-reserved, эмулятор платёжного шлюза
 internal/notification   обработчики событий orders/payment
+internal/gateway        REST/JSON-шлюз к gRPC для браузера
+frontend/               Vue 3 SPA (Vite), Dockerfile с nginx
 pkg/kafka               общие producer/consumer (retry, Dead Letter Topic)
 proto/                  .proto и сгенерированный код (proto/order, proto/inventory)
 docker/                 Dockerfile каждого сервиса
@@ -211,5 +220,6 @@ docker/                 Dockerfile каждого сервиса
 - **Деньги в `float32`.** Допущение MVP; в production — целые минимальные единицы (копейки) или decimal.
 - **Масштабирование.** Топики создаются с 3 партициями, но брокер один (replication factor 1); экземпляры сервисов хранят состояние в памяти, поэтому для горизонтального масштабирования нужна внешняя БД.
 - **События — JSON**, без Schema Registry и версионирования.
-- **Нет e2e-теста** с реальным брокером (тесты модульные, Kafka подменена); не реализованы healthcheck сервисов, метрики (Prometheus), трассировка (OpenTelemetry), TLS/JWT для gRPC.
+- **Нет автоматического e2e-теста** с реальным брокером (вручную сценарий через compose проверен) (тесты модульные, Kafka подменена); не реализованы healthcheck сервисов, метрики (Prometheus), трассировка (OpenTelemetry), TLS/JWT для gRPC.
+- Шлюз без аутентификации и с открытым CORS (`*`) — допустимо только для MVP; у первого запроса после холодного старта Kafka возможен таймаут 5 с (повтор проходит).
 - `notification-service` только логирует уведомления.

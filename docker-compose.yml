@@ -102,6 +102,33 @@ services:
     networks:
       - kafka-network
 
+  gateway:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.gateway
+    environment:
+      ORDER_SERVICE_ADDR: order-service:50051
+      INVENTORY_SERVICE_ADDR: inventory-service:50051
+    ports:
+      - "8080:8080"
+    restart: unless-stopped
+    depends_on:
+      - order-service
+      - inventory-service
+    networks:
+      - kafka-network
+
+  frontend:
+    build:
+      context: ./frontend
+    ports:
+      - "3000:80"
+    restart: unless-stopped
+    depends_on:
+      - gateway
+    networks:
+      - kafka-network
+
 networks:
   kafka-network:
     driver: bridge
